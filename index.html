@@ -12,6 +12,7 @@
 
 
 
+
 /* ── RESET & BASE ── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -223,28 +224,10 @@ tbody tr.no-hover:hover td{background:none;cursor:default}
 
 
 
+
 </style>
 </head>
 <body>
-<script>
-(function() {
-  var hash = window.location.hash;
-  if (!hash) return;
-  var params = new URLSearchParams(hash.slice(1));
-  var token = params.get("access_token");
-  var state = params.get("state");
-  if (!token || state !== "comptaia_dbx_oauth") return;
-  window.history.replaceState({}, "", window.location.pathname);
-  localStorage.setItem("comptaia_dbx", JSON.stringify(token));
-  document.getElementById("root").innerHTML =
-    '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#080f1c;color:#e8eef8;font-family:sans-serif;flex-direction:column;gap:16px;text-align:center;padding:20px">' +
-    '<div style="font-size:50px">✅</div>' +
-    '<div style="font-size:22px;color:#c9a84c;font-weight:700">Dropbox connecté !</div>' +
-    '<div style="font-size:13px;color:#7a90b8;max-width:400px">Token enregistré. Synchronisation active.</div>' +
-    '<button onclick="location.reload()" style="margin-top:12px;padding:12px 28px;background:#c9a84c;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;color:#080f1c">🚀 Ouvrir ComptaIA</button>' +
-    '</div>';
-})();
-</script>
 <script>
 window.onerror = function(msg,src,line,col,err) {
   var root = document.getElementById("root");
@@ -1231,6 +1214,18 @@ function App() {
 
   // Load
   useEffect(() => {
+    // Handle Dropbox PKCE callback
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("code") && params.get("state") === "comptaia_dbx_oauth") {
+      handleDropboxCallback().then(ok => {
+        if (ok) {
+          document.getElementById("root").innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#080f1c;color:#e8eef8;font-family:sans-serif;flex-direction:column;gap:16px;text-align:center;padding:20px">' + '<div style="font-size:50px">✅</div>' + '<div style="font-size:22px;color:#c9a84c;font-weight:700">Dropbox connecté !</div>' + '<div style="font-size:13px;color:#7a90b8">Synchronisation active sur tous vos appareils.</div>' + '<button onclick="location.reload()" style="margin-top:12px;padding:12px 28px;background:#c9a84c;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;color:#080f1c">🚀 Ouvrir ComptaIA</button>' + '</div>';
+        } else {
+          window.location.href = window.location.pathname;
+        }
+      });
+      return;
+    }
     const raw = lsGet(LS_KEY, null);
     const d = migrateData(raw);
     setData(d);
@@ -3796,19 +3791,28 @@ function SettingsPage({
     }
     setDbxSaving(false);
   };
-  const startOAuth = () => {
+  const startOAuth = async () => {
     const key = appKey.trim();
     if (!key) {
       notify("Saisissez l'App Key", "err");
       return;
     }
     lsSet("comptaia_dbx_appkey", key);
+    // PKCE flow - works with all modern Dropbox apps
+    const verifier = Array.from(crypto.getRandomValues(new Uint8Array(32))).map(b => b.toString(16).padStart(2, '0')).join('');
+    lsSet("comptaia_dbx_verifier", verifier);
+    const enc = new TextEncoder();
+    const digest = await crypto.subtle.digest('SHA-256', enc.encode(verifier));
+    const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
     const redirectUri = window.location.origin + window.location.pathname;
     window.location.href = "https://www.dropbox.com/oauth2/authorize?" + new URLSearchParams({
       client_id: key,
-      response_type: "token",
+      response_type: "code",
+      code_challenge: challenge,
+      code_challenge_method: "S256",
       state: "comptaia_dbx_oauth",
-      redirect_uri: redirectUri
+      redirect_uri: redirectUri,
+      token_access_type: "legacy"
     }).toString();
   };
   const syncNow = async () => {
@@ -4713,6 +4717,47 @@ function ReminderModal({
     className: "btn btn-gold",
     onClick: submit
   }, "\uD83D\uDD14 Cr\xE9er le rappel"))));
+}
+
+// ── DROPBOX PKCE CALLBACK HANDLER ──
+// Called after Dropbox redirects back with ?code=...
+async function handleDropboxCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  const state = params.get("state");
+  if (!code || state !== "comptaia_dbx_oauth") return false;
+
+  // Clean URL
+  window.history.replaceState({}, "", window.location.pathname);
+  const appKey = lsGet("comptaia_dbx_appkey", "");
+  const verifier = lsGet("comptaia_dbx_verifier", "");
+  const redirectUri = window.location.origin + window.location.pathname;
+  if (!appKey || !verifier) return false;
+  try {
+    const res = await fetch("https://api.dropboxapi.com/oauth2/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: new URLSearchParams({
+        code,
+        grant_type: "authorization_code",
+        client_id: appKey,
+        code_verifier: verifier,
+        redirect_uri: redirectUri
+      })
+    });
+    const data = await res.json();
+    if (data.access_token) {
+      lsSet("comptaia_dbx", data.access_token);
+      if (data.refresh_token) lsSet("comptaia_dbx_refresh", data.refresh_token);
+      lsDel("comptaia_dbx_verifier");
+      return true;
+    }
+  } catch (e) {
+    console.error("PKCE exchange error:", e);
+  }
+  return false;
 }
 
 // ── MOUNT ──
