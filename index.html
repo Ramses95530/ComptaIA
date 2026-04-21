@@ -13,6 +13,7 @@
 
 
 
+
 /* ── RESET & BASE ── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -225,14 +226,29 @@ tbody tr.no-hover:hover td{background:none;cursor:default}
 
 
 
+
 </style>
 </head>
 <body>
 <script>
+(function() {
+  var hash = window.location.hash;
+  if (!hash) return;
+  var params = new URLSearchParams(hash.slice(1));
+  var token = params.get("access_token");
+  var state = params.get("state");
+  if (!token || state !== "comptaia_dbx_oauth") return;
+  window.history.replaceState({}, "", window.location.pathname);
+  localStorage.setItem("comptaia_dbx", JSON.stringify(token));
+  document.getElementById("root").innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#080f1c;color:#e8eef8;font-family:sans-serif;flex-direction:column;gap:16px;text-align:center;padding:20px"><div style="font-size:50px">✅</div><div style="font-size:22px;color:#c9a84c;font-weight:700">Dropbox connecté !</div><div style="font-size:13px;color:#7a90b8">Synchronisation active.</div><button onclick="location.reload()" style="margin-top:12px;padding:12px 28px;background:#c9a84c;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;color:#080f1c">🚀 Ouvrir ComptaIA</button></div>';
+})();
+</script>
+<script>
 window.onerror = function(msg,src,line,col,err) {
   var root = document.getElementById("root");
   if (root && !root.children.length) {
-    root.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#080f1c;color:#e8eef8;font-family:sans-serif;flex-direction:column;gap:12px;padding:20px;text-align:center"><div style="font-size:40px">⚠️</div><div style="font-size:18px;color:#c9a84c;font-weight:700">Erreur</div><div style="font-size:12px;color:#7a90b8;max-width:500px;word-break:break-word">' + msg + '</div><button onclick="location.reload()" style="margin-top:8px;padding:10px 20px;background:#c9a84c;border:none;border-radius:6px;font-size:13px;cursor:pointer">🔄 Recharger</button></div>';
+    root.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#080f1c;color:#e8eef8;font-family:sans-serif;flex-direction:column;gap:12px;padding:20px;text-align:center"><div style="font-size:40px">⚠️</div><div style="font-size:18px;color:#c9a84c;font-weight:700">Erreur</div><div style="font-size:12px;color:#7a90b8;max-width:500px">' + msg + '</div><button onclick="location.reload()" style="margin-top:8px;padding:10px 20px;background:#c9a84c;border:none;border-radius:6px;font-size:13px;cursor:pointer">🔄 Recharger</button></div>';
   }
   return true;
 };
@@ -296,6 +312,41 @@ const CATS = {
     label: "Note de Frais",
     icon: "🧾",
     color: "#a78bfa"
+  },
+  sous_traitant: {
+    label: "Sous-Traitant",
+    icon: "🔧",
+    color: "#f97316"
+  }
+};
+const ST_TYPES = {
+  travaux: {
+    label: "Travaux / Chantier",
+    icon: "🏗️"
+  },
+  etude: {
+    label: "Étude / Bureau d'études",
+    icon: "📐"
+  },
+  fourniture: {
+    label: "Fourniture + Pose",
+    icon: "🔩"
+  },
+  location: {
+    label: "Location matériel",
+    icon: "🚜"
+  },
+  transport: {
+    label: "Transport / Livraison",
+    icon: "🚛"
+  },
+  service: {
+    label: "Prestation de service",
+    icon: "💼"
+  },
+  autre: {
+    label: "Autre sous-traitance",
+    icon: "📋"
   }
 };
 const STATUTS = {
@@ -1345,7 +1396,8 @@ function App() {
   const totalCA = entries.filter(e => e.categorie === "client").reduce((s, e) => s + num(e.ttc), 0);
   const caEnc = entries.filter(e => e.categorie === "client" && e.statut === "paye").reduce((s, e) => s + num(e.ttc), 0);
   const caNonEnc = entries.filter(e => e.categorie === "client" && (!e.statut || e.statut === "non_paye")).reduce((s, e) => s + num(e.ttc), 0);
-  const totalFourn = entries.filter(e => e.categorie === "fournisseur").reduce((s, e) => s + num(e.ttc), 0);
+  const totalFourn = entries.filter(e => ["fournisseur", "sous_traitant"].includes(e.categorie)).reduce((s, e) => s + num(e.ttc), 0);
+  const totalST = entries.filter(e => e.categorie === "sous_traitant").reduce((s, e) => s + num(e.ttc), 0);
   const fournNonPaye = entries.filter(e => e.categorie === "fournisseur" && (!e.statut || e.statut === "non_paye")).reduce((s, e) => s + num(e.ttc), 0);
   const tvaCol = entries.filter(e => e.categorie === "client" && e.statut === "paye").reduce((s, e) => s + num(e.tva_montant), 0);
   const tvaDed = entries.filter(e => ["fournisseur", "divers"].includes(e.categorie) && e.statut === "paye").reduce((s, e) => s + num(e.tva_montant), 0);
@@ -1357,6 +1409,7 @@ function App() {
     charges: "charges_sociales",
     notes_frais: "note_frais",
     divers: "divers",
+    sous_traitants: "sous_traitant",
     releves: "releve",
     eurofactor: "eurofactor"
   };
@@ -1404,6 +1457,11 @@ function App() {
       icon: "📋",
       label: "Divers",
       badge: entries.filter(e => e.categorie === "divers").length
+    }, {
+      id: "sous_traitants",
+      icon: "🔧",
+      label: "Sous-Traitants",
+      badge: entries.filter(e => e.categorie === "sous_traitant").length
     }, {
       id: "releves",
       icon: "🏦",
@@ -1576,6 +1634,10 @@ function App() {
     markDone: markDone,
     entries: entries,
     setDetailEntry: setDetailEntry
+  }), page === "sous_traitants" && /*#__PURE__*/React.createElement(SousTraitantsPage, {
+    entries: entries,
+    setDetailEntry: setDetailEntry,
+    setPage: setPage
   }), page === "eurofactor" && /*#__PURE__*/React.createElement(EurofactorPage, {
     entries: entries,
     setDetailEntry: setDetailEntry
@@ -2229,7 +2291,9 @@ function TVAPage({
   const [tvaMode, setTvaMode] = useState("encaissements"); // "encaissements" | "tous"
   const col = pEntries.filter(e => e.categorie === "client" && (tvaMode === "tous" || e.statut === "paye")).reduce((s, e) => s + num(e.tva_montant), 0);
   const colTous = pEntries.filter(e => e.categorie === "client").reduce((s, e) => s + num(e.tva_montant), 0);
-  const ded = pEntries.filter(e => ["fournisseur", "divers"].includes(e.categorie) && (tvaMode === "tous" || e.statut === "paye")).reduce((s, e) => s + num(e.tva_montant), 0);
+  const ded = pEntries.filter(e => ["fournisseur", "divers", "sous_traitant"].includes(e.categorie) && !e.st_autoliquidation && (tvaMode === "tous" || e.statut === "paye")).reduce((s, e) => s + num(e.tva_montant), 0);
+  // TVA autoliquidée : collectée ET déductible (s'annulent, mais doivent figurer en déclaration)
+  const tvaAutoliq = pEntries.filter(e => e.categorie === "sous_traitant" && e.st_autoliquidation && (tvaMode === "tous" || e.statut === "paye")).reduce((s, e) => s + num(e.ht) * 0.2, 0);
   const nette = col - ded;
   const byRate = {};
   TVA_RATES.forEach(r => {
@@ -2694,6 +2758,310 @@ function AmortPage({
       }
     }, eur(r.vr)), /*#__PURE__*/React.createElement("td", null))) : [])];
   }))))));
+}
+
+// ── SOUS-TRAITANTS PAGE ──
+function SousTraitantsPage({
+  entries,
+  setDetailEntry,
+  setPage
+}) {
+  const stEntries = entries.filter(e => e.categorie === "sous_traitant");
+  const [search, setSearch] = useState("");
+  const [curPage, setCurPage] = useState(1);
+  const [f, setF] = useState({
+    sort: "date_desc",
+    chantier: "",
+    stType: ""
+  });
+  const sf2 = (k, v) => setF(p => ({
+    ...p,
+    [k]: v
+  }));
+  const filtered = useMemo(() => {
+    let r = [...stEntries];
+    if (search) {
+      const q = search.toLowerCase();
+      r = r.filter(e => (e.tiers || "").toLowerCase().includes(q) || (e.st_chantier || "").toLowerCase().includes(q) || (e.numero || "").toLowerCase().includes(q) || (e.st_siret || "").includes(q));
+    }
+    if (f.chantier) r = r.filter(e => (e.st_chantier || "").toLowerCase().includes(f.chantier.toLowerCase()));
+    if (f.stType) r = r.filter(e => e.st_type === f.stType);
+    if (f.sort === "date_desc") r.sort((a, b) => (b.date || "") > (a.date || "") ? 1 : -1);else if (f.sort === "amt_desc") r.sort((a, b) => num(b.ttc) - num(a.ttc));else if (f.sort === "tiers") r.sort((a, b) => (a.tiers || "").localeCompare(b.tiers || ""));
+    return r;
+  }, [stEntries, search, f]);
+  useEffect(() => setCurPage(1), [filtered.length]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((curPage - 1) * PAGE_SIZE, curPage * PAGE_SIZE);
+
+  // Stats
+  const totalHT = filtered.reduce((s, e) => s + num(e.ht), 0);
+  const totalTTC = filtered.reduce((s, e) => s + num(e.ttc), 0);
+  const totalTVA = filtered.reduce((s, e) => s + num(e.tva_montant), 0);
+  const autoliq = filtered.filter(e => e.st_autoliquidation);
+  const totalAutoliq = autoliq.reduce((s, e) => s + num(e.ht), 0);
+  const nonPaye = filtered.filter(e => !e.statut || e.statut === "non_paye");
+  const totalNonPaye = nonPaye.reduce((s, e) => s + num(e.ttc), 0);
+
+  // Retenue de garantie
+  const totalRetenue = filtered.reduce((s, e) => {
+    const r = num(e.st_retenue);
+    return s + (r > 0 ? num(e.ht) * r / 100 : 0);
+  }, 0);
+
+  // Chantiers
+  const chantiers = [...new Set(filtered.map(e => e.st_chantier).filter(Boolean))];
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(4,1fr)",
+      gap: 12,
+      marginBottom: 16
+    }
+  }, [[totalTTC, "Total sous-traitance (TTC)", "var(--orange)", "#f97316", filtered.length + " factures"], [totalNonPaye, "À payer (non réglé)", "var(--red)", "#f87171", nonPaye.length + " factures"], [totalRetenue, "Retenues de garantie", "var(--amber)", "#f59e0b", "Sur montants HT"], [totalAutoliq, "TVA autoliquidée (HT)", "var(--teal)", "#2dd4bf", autoliq.length + " factures"]].map(([v, l, c, a, sub]) => /*#__PURE__*/React.createElement("div", {
+    key: l,
+    className: "stat-card",
+    style: {
+      "--accent": a
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "stat-lbl"
+  }, l), /*#__PURE__*/React.createElement("div", {
+    className: "stat-val",
+    style: {
+      color: c,
+      fontSize: 18
+    }
+  }, eur(v)), /*#__PURE__*/React.createElement("div", {
+    className: "stat-sub"
+  }, sub)))), autoliq.length > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "alert info",
+    style: {
+      marginBottom: 12,
+      background: "rgba(45,212,191,.08)",
+      borderColor: "rgba(45,212,191,.2)"
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "\u2139\uFE0F"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: "var(--teal)"
+    }
+  }, "TVA autoliquid\xE9e : ", eur(totalAutoliq), " HT"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: "var(--tx2)"
+    }
+  }, "Vous devez d\xE9clarer la TVA sur ces factures \xE0 la place du sous-traitant. TVA correspondante : ", eur(totalAutoliq * 0.2), " (\xE0 20%)."))), /*#__PURE__*/React.createElement("div", {
+    className: "search-row"
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--tx3)"
+    }
+  }, "\uD83D\uDD0D"), /*#__PURE__*/React.createElement("input", {
+    placeholder: "Sous-traitant, chantier, SIRET\u2026",
+    value: search,
+    onChange: e => setSearch(e.target.value)
+  }), /*#__PURE__*/React.createElement("select", {
+    value: f.stType,
+    onChange: e => sf2("stType", e.target.value),
+    style: {
+      background: "var(--bg3)",
+      border: "1px solid rgba(255,255,255,.08)",
+      borderRadius: "var(--r2)",
+      padding: "6px 10px",
+      fontSize: 12,
+      color: "var(--tx)"
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Tous les types"), Object.entries(ST_TYPES).map(([k, v]) => /*#__PURE__*/React.createElement("option", {
+    key: k,
+    value: k
+  }, v.icon, " ", v.label))), /*#__PURE__*/React.createElement("select", {
+    value: f.sort,
+    onChange: e => sf2("sort", e.target.value),
+    style: {
+      background: "var(--bg3)",
+      border: "1px solid rgba(255,255,255,.08)",
+      borderRadius: "var(--r2)",
+      padding: "6px 10px",
+      fontSize: 12,
+      color: "var(--tx)"
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "date_desc"
+  }, "Date \u2193"), /*#__PURE__*/React.createElement("option", {
+    value: "amt_desc"
+  }, "Montant \u2193"), /*#__PURE__*/React.createElement("option", {
+    value: "tiers"
+  }, "Sous-traitant A-Z")), (search || f.stType) && /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-danger btn-sm",
+    onClick: () => {
+      setSearch("");
+      setF({
+        sort: "date_desc",
+        chantier: "",
+        stType: ""
+      });
+    }
+  }, "\u2715 Reset"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-gold btn-sm",
+    onClick: () => setPage("all"),
+    style: {
+      marginLeft: "auto"
+    }
+  }, "+ Saisie sous-traitant")), chantiers.length > 1 && /*#__PURE__*/React.createElement("div", {
+    className: "tbl-wrap",
+    style: {
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "tbl-hd"
+  }, /*#__PURE__*/React.createElement("h3", null, "\uD83C\uDFD7\uFE0F R\xE9sum\xE9 par chantier")), /*#__PURE__*/React.createElement("div", {
+    className: "tbl-scroll"
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Chantier"), /*#__PURE__*/React.createElement("th", null, "Sous-traitants"), /*#__PURE__*/React.createElement("th", null, "Nb factures"), /*#__PURE__*/React.createElement("th", null, "Total HT"), /*#__PURE__*/React.createElement("th", null, "Retenue"), /*#__PURE__*/React.createElement("th", null, "Total TTC"))), /*#__PURE__*/React.createElement("tbody", null, chantiers.map(ch => {
+    const chE = filtered.filter(e => e.st_chantier === ch);
+    const chST = [...new Set(chE.map(e => e.tiers).filter(Boolean))];
+    const chHT = chE.reduce((s, e) => s + num(e.ht), 0);
+    const chRet = chE.reduce((s, e) => s + (num(e.st_retenue) > 0 ? num(e.ht) * num(e.st_retenue) / 100 : 0), 0);
+    const chTTC = chE.reduce((s, e) => s + num(e.ttc), 0);
+    const row = /*#__PURE__*/React.createElement("tr", {
+      key: ch,
+      onClick: () => sf2("chantier", f.chantier === ch ? "" : ch)
+    }, /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontWeight: 600,
+        color: "var(--orange)"
+      }
+    }, ch), /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontSize: 11,
+        color: "var(--tx2)"
+      }
+    }, chST.slice(0, 3).join(", "), chST.length > 3 ? " +" + (chST.length - 3) : ""), /*#__PURE__*/React.createElement("td", null, chE.length), /*#__PURE__*/React.createElement("td", {
+      className: "mono"
+    }, eur(chHT)), /*#__PURE__*/React.createElement("td", {
+      className: "mono",
+      style: {
+        color: "var(--amber)"
+      }
+    }, chRet > 0 ? eur(chRet) : "—"), /*#__PURE__*/React.createElement("td", {
+      className: "mono",
+      style: {
+        fontWeight: 700
+      }
+    }, eur(chTTC)));
+    return row;
+  }))))), /*#__PURE__*/React.createElement("div", {
+    className: "tbl-wrap"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "tbl-hd"
+  }, /*#__PURE__*/React.createElement("h3", null, "\uD83D\uDD27 Factures sous-traitants (", filtered.length, ")"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: "var(--tx2)",
+      display: "flex",
+      gap: 10
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "HT: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: "var(--tx)"
+    }
+  }, eur(totalHT))), /*#__PURE__*/React.createElement("span", null, "TVA: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: "var(--amber)"
+    }
+  }, eur(totalTVA))), /*#__PURE__*/React.createElement("span", null, "TTC: ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: "var(--orange)"
+    }
+  }, eur(totalTTC))))), filtered.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "empty"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "empty-icon"
+  }, "\uD83D\uDD27"), /*#__PURE__*/React.createElement("p", null, "Aucune facture sous-traitant. Cliquez sur ", /*#__PURE__*/React.createElement("b", null, "+ Saisie"), " \u2192 cat\xE9gorie ", /*#__PURE__*/React.createElement("b", null, "Sous-Traitant"), ".")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "tbl-scroll"
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Date"), /*#__PURE__*/React.createElement("th", null, "Sous-Traitant"), /*#__PURE__*/React.createElement("th", null, "Chantier"), /*#__PURE__*/React.createElement("th", null, "Type"), /*#__PURE__*/React.createElement("th", null, "HT"), /*#__PURE__*/React.createElement("th", null, "TVA"), /*#__PURE__*/React.createElement("th", null, "TTC"), /*#__PURE__*/React.createElement("th", null, "Retenue"), /*#__PURE__*/React.createElement("th", null, "Statut"), /*#__PURE__*/React.createElement("th", null, "\uD83D\uDD04"))), /*#__PURE__*/React.createElement("tbody", null, paginated.map(e => {
+    const retMont = num(e.st_retenue) > 0 ? num(e.ht) * num(e.st_retenue) / 100 : 0;
+    const row = /*#__PURE__*/React.createElement("tr", {
+      key: e.id,
+      onClick: () => setDetailEntry(e)
+    }, /*#__PURE__*/React.createElement("td", {
+      style: {
+        whiteSpace: "nowrap"
+      }
+    }, fmtDate(e.date)), /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontWeight: 600,
+        maxWidth: 130,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+      }
+    }, e.tiers || "—"), /*#__PURE__*/React.createElement("td", {
+      style: {
+        fontSize: 11,
+        color: "var(--orange)",
+        maxWidth: 110,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap"
+      }
+    }, e.st_chantier || "—"), /*#__PURE__*/React.createElement("td", null, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 10,
+        color: "var(--tx2)"
+      }
+    }, ST_TYPES[e.st_type]?.icon, " ", ST_TYPES[e.st_type]?.label?.slice(0, 14) || "—")), /*#__PURE__*/React.createElement("td", {
+      className: "mono"
+    }, eur(e.ht)), /*#__PURE__*/React.createElement("td", {
+      className: "mono",
+      style: {
+        color: "var(--amber)",
+        fontSize: 11
+      }
+    }, e.st_autoliquidation ? /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: "var(--teal)",
+        fontSize: 10
+      }
+    }, "Autoliq.") : eur(e.tva_montant)), /*#__PURE__*/React.createElement("td", {
+      className: "mono",
+      style: {
+        fontWeight: 700
+      }
+    }, eur(e.ttc)), /*#__PURE__*/React.createElement("td", {
+      className: "mono",
+      style: {
+        color: "var(--amber)",
+        fontSize: 11
+      }
+    }, retMont > 0 ? eur(retMont) : "—"), /*#__PURE__*/React.createElement("td", null, e.statut && STATUTS[e.statut] ? /*#__PURE__*/React.createElement("span", {
+      className: "tag",
+      style: {
+        background: "rgba(0,0,0,.2)",
+        color: STATUTS[e.statut].color,
+        fontSize: 10
+      }
+    }, STATUTS[e.statut].icon) : /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: "var(--tx3)",
+        fontSize: 11
+      }
+    }, "\u2014")), /*#__PURE__*/React.createElement("td", null, e.st_autoliquidation && /*#__PURE__*/React.createElement("span", {
+      title: "TVA autoliquid\xE9e",
+      style: {
+        color: "var(--teal)",
+        fontSize: 12
+      }
+    }, "\uD83D\uDD04")));
+    return row;
+  })))), /*#__PURE__*/React.createElement(Pagination, {
+    current: curPage,
+    total: totalPages,
+    onChange: p => {
+      setCurPage(p);
+      window.scrollTo(0, 0);
+    }
+  }))));
 }
 
 // ── EUROFACTOR PAGE ──
@@ -4175,6 +4543,11 @@ function AddModal({
     charge_type: "urssaf",
     note_type: "repas",
     eurofactor_type: "remise",
+    st_type: "travaux",
+    st_siret: "",
+    st_chantier: "",
+    st_retenue: "",
+    st_autoliquidation: false,
     tiers: "",
     numero: "",
     date: today(),
@@ -4356,7 +4729,57 @@ function AddModal({
     placeholder: "Ref Eurofactor\u2026",
     value: form.eurofactor_ref || "",
     onChange: e => sf("eurofactor_ref", e.target.value)
-  }))), form.ht && form.tva_taux && /*#__PURE__*/React.createElement("div", {
+  })), form.categorie === "sous_traitant" && /*#__PURE__*/React.createElement("div", {
+    className: "fg"
+  }, /*#__PURE__*/React.createElement("label", null, "Type de sous-traitance"), /*#__PURE__*/React.createElement("select", {
+    value: form.st_type || "travaux",
+    onChange: e => sf("st_type", e.target.value)
+  }, Object.entries(ST_TYPES).map(([k, v]) => /*#__PURE__*/React.createElement("option", {
+    key: k,
+    value: k
+  }, v.icon, " ", v.label)))), form.categorie === "sous_traitant" && /*#__PURE__*/React.createElement("div", {
+    className: "fg"
+  }, /*#__PURE__*/React.createElement("label", null, "N\xB0 SIRET sous-traitant"), /*#__PURE__*/React.createElement("input", {
+    placeholder: "123 456 789 00012",
+    value: form.st_siret || "",
+    onChange: e => sf("st_siret", e.target.value)
+  })), form.categorie === "sous_traitant" && /*#__PURE__*/React.createElement("div", {
+    className: "fg full"
+  }, /*#__PURE__*/React.createElement("label", null, "Chantier / Affaire"), /*#__PURE__*/React.createElement("input", {
+    placeholder: "Nom du chantier ou de l'affaire\u2026",
+    value: form.st_chantier || "",
+    onChange: e => sf("st_chantier", e.target.value)
+  })), form.categorie === "sous_traitant" && /*#__PURE__*/React.createElement("div", {
+    className: "fg"
+  }, /*#__PURE__*/React.createElement("label", null, "Retenue de garantie (%)"), /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    step: "0.1",
+    min: "0",
+    max: "10",
+    placeholder: "5",
+    value: form.st_retenue || "",
+    onChange: e => sf("st_retenue", e.target.value)
+  })), form.categorie === "sous_traitant" && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      fontSize: 12,
+      color: "var(--tx2)",
+      marginTop: 4,
+      gridColumn: "1/-1"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    id: "autoliq",
+    checked: !!form.st_autoliquidation,
+    onChange: e => sf("st_autoliquidation", e.target.checked)
+  }), /*#__PURE__*/React.createElement("label", {
+    htmlFor: "autoliq",
+    style: {
+      cursor: "pointer"
+    }
+  }, "TVA autoliquid\xE9e (vous d\xE9clarez la TVA \xE0 la place du sous-traitant)"))), form.ht && form.tva_taux && /*#__PURE__*/React.createElement("div", {
     style: {
       background: "var(--bg3)",
       borderRadius: "var(--r2)",
@@ -4479,7 +4902,51 @@ function DetailModal({
       fontSize: 12,
       textAlign: "right"
     }
-  }, entry.description)), /*#__PURE__*/React.createElement("div", {
+  }, entry.description)), entry.st_chantier && /*#__PURE__*/React.createElement("div", {
+    className: "dr"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "dl"
+  }, "\uD83C\uDFD7\uFE0F Chantier"), /*#__PURE__*/React.createElement("span", {
+    className: "dv",
+    style: {
+      fontWeight: 600,
+      color: "var(--orange)"
+    }
+  }, entry.st_chantier)), entry.st_type && /*#__PURE__*/React.createElement("div", {
+    className: "dr"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "dl"
+  }, "Type ST"), /*#__PURE__*/React.createElement("span", {
+    className: "dv"
+  }, ST_TYPES[entry.st_type]?.icon, " ", ST_TYPES[entry.st_type]?.label || "—")), entry.st_siret && /*#__PURE__*/React.createElement("div", {
+    className: "dr"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "dl"
+  }, "SIRET"), /*#__PURE__*/React.createElement("span", {
+    className: "dv",
+    style: {
+      fontFamily: "monospace",
+      fontSize: 12
+    }
+  }, entry.st_siret)), entry.st_retenue && num(entry.st_retenue) > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "dr"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "dl"
+  }, "Retenue garantie"), /*#__PURE__*/React.createElement("span", {
+    className: "dv",
+    style: {
+      color: "var(--amber)"
+    }
+  }, entry.st_retenue, "% = ", eur(num(entry.ht) * num(entry.st_retenue) / 100))), entry.st_autoliquidation && /*#__PURE__*/React.createElement("div", {
+    className: "dr"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "dl"
+  }, "TVA"), /*#__PURE__*/React.createElement("span", {
+    className: "dv",
+    style: {
+      color: "var(--teal)"
+    }
+  }, "\uD83D\uDD04 Autoliquid\xE9e (vous d\xE9clarez)")), /*#__PURE__*/React.createElement("div", {
     style: {
       height: 8
     }
