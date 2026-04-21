@@ -18,6 +18,7 @@
 
 
 
+
 /* ── RESET & BASE ── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -226,6 +227,7 @@ tbody tr.no-hover:hover td{background:none;cursor:default}
 .pg-wrap{display:flex;align-items:center;justify-content:center;gap:6px;padding:12px 16px;border-top:1px solid rgba(255,255,255,.04);flex-wrap:wrap}
 /* File storage indicator */
 .file-stored{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--blue);padding:2px 6px;background:rgba(96,165,250,.08);border-radius:10px;margin-top:4px}
+
 
 
 
@@ -679,6 +681,22 @@ const detectFraud = (entry, all) => {
     label: "Montant suspicieusement rond",
     severity: "low"
   });
+
+  // 7.5 Payment overdue (only for client/fournisseur with statut non_paye)
+  if (["client", "fournisseur", "sous_traitant"].includes(entry.categorie) && entry.date_echeance && (!entry.statut || entry.statut === "non_paye")) {
+    const retard = Math.floor((new Date() - new Date(entry.date_echeance)) / 86400000);
+    if (retard > 30) flags.push({
+      id: "overdue",
+      label: "Retard de paiement " + retard + " jours",
+      severity: "high",
+      extra: eur(entry.ttc) + " — Échéance: " + fmtDate(entry.date_echeance)
+    });else if (retard > 0) flags.push({
+      id: "overdue_soon",
+      label: "Paiement en retard de " + retard + " jours",
+      severity: "medium",
+      extra: "Échéance: " + fmtDate(entry.date_echeance)
+    });
+  }
 
   // 8. Old document
   if (entry.date && new Date(entry.date) < new Date(Date.now() - 365 * 86400000)) flags.push({
@@ -1699,7 +1717,8 @@ function App() {
     entries: pageEntries,
     page: page,
     setDetailEntry: setDetailEntry,
-    setAlertEntry: setAlertEntry
+    setAlertEntry: setAlertEntry,
+    onEditEntry: editEntry
   }), page === "tva" && /*#__PURE__*/React.createElement(TVAPage, {
     entries: entries
   }), page === "amort" && /*#__PURE__*/React.createElement(AmortPage, {
@@ -1719,7 +1738,8 @@ function App() {
   }), page === "sous_traitants" && /*#__PURE__*/React.createElement(SousTraitantsPage, {
     entries: entries,
     setDetailEntry: setDetailEntry,
-    setPage: setPage
+    setPage: setPage,
+    onEditEntry: editEntry
   }), page === "eurofactor" && /*#__PURE__*/React.createElement(EurofactorPage, {
     entries: entries,
     setDetailEntry: setDetailEntry
@@ -1900,7 +1920,22 @@ function Dashboard({
       marginLeft: "auto"
     },
     onClick: () => setPage("reminders")
-  }, "Voir \u2192")), fraudCount > 0 && /*#__PURE__*/React.createElement("div", {
+  }, "Voir \u2192")), (() => {
+    const overdue = entries.filter(e => ["client", "fournisseur", "sous_traitant"].includes(e.categorie) && e.date_echeance && (!e.statut || e.statut === "non_paye") && new Date(e.date_echeance) < new Date());
+    return overdue.length > 0 && /*#__PURE__*/React.createElement("div", {
+      className: "alert high",
+      style: {
+        marginBottom: 14,
+        borderColor: "rgba(248,113,113,.3)"
+      }
+    }, /*#__PURE__*/React.createElement("span", null, "\u23F0"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("b", null, overdue.length, " facture", overdue.length > 1 ? "s" : "", " en retard de paiement"), " \u2014 Total: ", eur(overdue.reduce((s, e) => s + num(e.ttc), 0))), /*#__PURE__*/React.createElement("button", {
+      className: "btn btn-ghost btn-sm",
+      style: {
+        marginLeft: "auto"
+      },
+      onClick: () => setPage("all")
+    }, "Voir \u2192"));
+  })(), fraudCount > 0 && /*#__PURE__*/React.createElement("div", {
     className: "alert high",
     style: {
       marginBottom: 14
@@ -2102,11 +2137,13 @@ function EntriesPage({
   entries,
   page,
   setDetailEntry,
-  setAlertEntry
+  setAlertEntry,
+  onEditEntry
 }) {
   const [search, setSearch] = useState("");
   const [showAdv, setShowAdv] = useState(false);
   const [curPage, setCurPage] = useState(1);
+  const [quickMenu, setQuickMenu] = useState(null); // {entryId, x, y}
   const [f, setF] = useState({
     dateFrom: "",
     dateTo: "",
@@ -2277,7 +2314,7 @@ function EntriesPage({
     className: "empty-icon"
   }, "\uD83D\uDCC2"), /*#__PURE__*/React.createElement("p", null, "Aucune entr\xE9e ne correspond aux filtres.")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "tbl-scroll"
-  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Date"), page === "all" && /*#__PURE__*/React.createElement("th", null, "Cat."), page === "charges" && /*#__PURE__*/React.createElement("th", null, "Organisme"), page === "notes_frais" && /*#__PURE__*/React.createElement("th", null, "Type"), /*#__PURE__*/React.createElement("th", null, "Tiers"), /*#__PURE__*/React.createElement("th", null, "N\xB0"), /*#__PURE__*/React.createElement("th", null, "HT"), /*#__PURE__*/React.createElement("th", null, "TVA%"), /*#__PURE__*/React.createElement("th", null, "TVA\u20AC"), /*#__PURE__*/React.createElement("th", null, "TTC"), /*#__PURE__*/React.createElement("th", null, "Statut"), /*#__PURE__*/React.createElement("th", null, "\u26A0"))), /*#__PURE__*/React.createElement("tbody", null, paginated.map(e => {
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Date"), page === "all" && /*#__PURE__*/React.createElement("th", null, "Cat."), page === "charges" && /*#__PURE__*/React.createElement("th", null, "Organisme"), page === "notes_frais" && /*#__PURE__*/React.createElement("th", null, "Type"), /*#__PURE__*/React.createElement("th", null, "Tiers"), /*#__PURE__*/React.createElement("th", null, "N\xB0"), /*#__PURE__*/React.createElement("th", null, "HT"), /*#__PURE__*/React.createElement("th", null, "TVA%"), /*#__PURE__*/React.createElement("th", null, "TVA\u20AC"), /*#__PURE__*/React.createElement("th", null, "TTC"), /*#__PURE__*/React.createElement("th", null, "\xC9ch\xE9ance"), /*#__PURE__*/React.createElement("th", null, "Statut"), /*#__PURE__*/React.createElement("th", null, "\u26A0"))), /*#__PURE__*/React.createElement("tbody", null, paginated.map(e => {
     const sev = fraudSev(e.fraudFlags);
     return /*#__PURE__*/React.createElement("tr", {
       key: e.id,
@@ -2328,20 +2365,53 @@ function EntriesPage({
         color: "var(--purple)"
       }
     }, NOTE_TYPES[e.note_type]?.icon, " ", NOTE_TYPES[e.note_type]?.label || "—")), /*#__PURE__*/React.createElement("td", {
-      onClick: ev => ev.stopPropagation()
+      style: {
+        whiteSpace: "nowrap",
+        fontSize: 11
+      }
+    }, e.date_echeance ? (() => {
+      const now = new Date();
+      const ech = new Date(e.date_echeance);
+      const retard = !e.statut || e.statut === "non_paye" ? Math.floor((now - ech) / 86400000) : 0;
+      return /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: retard > 0 ? "var(--red)" : retard > -7 ? "var(--amber)" : "var(--tx2)",
+          fontWeight: retard > 0 ? 700 : 400
+        }
+      }, fmtDate(e.date_echeance), retard > 0 ? " +" + retard + "j" : "");
+    })() : /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: "var(--tx3)"
+      }
+    }, "\u2014")), /*#__PURE__*/React.createElement("td", {
+      onClick: ev => {
+        ev.stopPropagation();
+        if (["client", "fournisseur", "divers", "sous_traitant", "note_frais"].includes(e.categorie)) {
+          setQuickMenu({
+            entry: e,
+            x: ev.clientX,
+            y: ev.clientY
+          });
+        }
+      }
     }, e.statut && STATUTS[e.statut] ? /*#__PURE__*/React.createElement("span", {
       className: "tag",
       style: {
         background: "rgba(0,0,0,.2)",
         color: STATUTS[e.statut].color,
-        fontSize: 10
-      }
-    }, STATUTS[e.statut].icon, " ", STATUTS[e.statut].label) : /*#__PURE__*/React.createElement("span", {
+        fontSize: 10,
+        cursor: "pointer",
+        userSelect: "none"
+      },
+      title: "Cliquer pour changer"
+    }, STATUTS[e.statut].icon, " ", STATUTS[e.statut].label, " \u25BE") : /*#__PURE__*/React.createElement("span", {
       style: {
         color: "var(--tx3)",
-        fontSize: 11
-      }
-    }, "\u2014")), /*#__PURE__*/React.createElement("td", {
+        fontSize: 11,
+        cursor: ["client", "fournisseur", "divers", "sous_traitant", "note_frais"].includes(e.categorie) ? "pointer" : "default"
+      },
+      title: "Cliquer pour d\xE9finir le statut"
+    }, "\u2014 \u25BE")), /*#__PURE__*/React.createElement("td", {
       onClick: ev => {
         ev.stopPropagation();
         sev && setAlertEntry(e);
@@ -2363,7 +2433,18 @@ function EntriesPage({
       setCurPage(p);
       window.scrollTo(0, 0);
     }
-  }))));
+  }))), quickMenu && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      top: quickMenu.y,
+      left: quickMenu.x,
+      zIndex: 1000
+    }
+  }, /*#__PURE__*/React.createElement(QuickStatutMenu, {
+    entry: quickMenu.entry,
+    onEdit: onEditEntry,
+    onClose: () => setQuickMenu(null)
+  })));
 }
 
 // ── TVA PAGE ──
@@ -2849,11 +2930,13 @@ function AmortPage({
 function SousTraitantsPage({
   entries,
   setDetailEntry,
-  setPage
+  setPage,
+  onEditEntry
 }) {
   const stEntries = entries.filter(e => e.categorie === "sous_traitant");
   const [search, setSearch] = useState("");
   const [curPage, setCurPage] = useState(1);
+  const [quickMenu, setQuickMenu] = useState(null);
   const [f, setF] = useState({
     sort: "date_desc",
     chantier: "",
@@ -3119,19 +3202,32 @@ function SousTraitantsPage({
         color: "var(--amber)",
         fontSize: 11
       }
-    }, retMont > 0 ? eur(retMont) : "—"), /*#__PURE__*/React.createElement("td", null, e.statut && STATUTS[e.statut] ? /*#__PURE__*/React.createElement("span", {
+    }, retMont > 0 ? eur(retMont) : "—"), /*#__PURE__*/React.createElement("td", {
+      onClick: ev => {
+        ev.stopPropagation();
+        setQuickMenu({
+          entry: e,
+          x: ev.clientX,
+          y: ev.clientY
+        });
+      }
+    }, e.statut && STATUTS[e.statut] ? /*#__PURE__*/React.createElement("span", {
       className: "tag",
       style: {
         background: "rgba(0,0,0,.2)",
         color: STATUTS[e.statut].color,
-        fontSize: 10
-      }
-    }, STATUTS[e.statut].icon) : /*#__PURE__*/React.createElement("span", {
+        fontSize: 10,
+        cursor: "pointer"
+      },
+      title: "Cliquer pour changer"
+    }, STATUTS[e.statut].icon, " \u25BE") : /*#__PURE__*/React.createElement("span", {
       style: {
         color: "var(--tx3)",
-        fontSize: 11
-      }
-    }, "\u2014")), /*#__PURE__*/React.createElement("td", null, e.st_autoliquidation && /*#__PURE__*/React.createElement("span", {
+        fontSize: 11,
+        cursor: "pointer"
+      },
+      title: "D\xE9finir statut"
+    }, "\u2014 \u25BE")), /*#__PURE__*/React.createElement("td", null, e.st_autoliquidation && /*#__PURE__*/React.createElement("span", {
       title: "TVA autoliquid\xE9e",
       style: {
         color: "var(--teal)",
@@ -3146,7 +3242,18 @@ function SousTraitantsPage({
       setCurPage(p);
       window.scrollTo(0, 0);
     }
-  }))));
+  }))), quickMenu && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "fixed",
+      top: quickMenu.y,
+      left: quickMenu.x,
+      zIndex: 1000
+    }
+  }, /*#__PURE__*/React.createElement(QuickStatutMenu, {
+    entry: quickMenu.entry,
+    onEdit: onEditEntry,
+    onClose: () => setQuickMenu(null)
+  })));
 }
 
 // ── EUROFACTOR PAGE ──
@@ -4663,10 +4770,22 @@ function AddModal({
     description: "",
     statut: "non_paye",
     date_paiement: "",
+    date_echeance: "",
+    delai_paiement: "30",
     eurofactor_ref: ""
   });
   const [errs, setErrs] = useState({});
   const sf = (k, v) => setForm(p => {
+    // Auto-calculate date_echeance when date or delai changes
+    if (k === "date" && p.delai_paiement && p.delai_paiement !== "custom" && parseInt(p.delai_paiement) >= 0) {
+      const d = new Date(v);
+      d.setDate(d.getDate() + parseInt(p.delai_paiement));
+      return {
+        ...p,
+        [k]: v,
+        date_echeance: d.toISOString().slice(0, 10)
+      };
+    }
     const n = {
       ...p,
       [k]: v
@@ -4812,6 +4931,39 @@ function AddModal({
     type: "date",
     value: form.date_paiement || "",
     onChange: e => sf("date_paiement", e.target.value)
+  })), (form.categorie === "client" || form.categorie === "fournisseur" || form.categorie === "sous_traitant") && /*#__PURE__*/React.createElement("div", {
+    className: "fg"
+  }, /*#__PURE__*/React.createElement("label", null, "D\xE9lai de paiement"), /*#__PURE__*/React.createElement("select", {
+    value: form.delai_paiement || "30",
+    onChange: e => {
+      sf("delai_paiement", e.target.value);
+      if (form.date && e.target.value !== "custom") {
+        const d = new Date(form.date);
+        d.setDate(d.getDate() + parseInt(e.target.value));
+        sf("date_echeance", d.toISOString().slice(0, 10));
+      }
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: "0"
+  }, "Comptant"), /*#__PURE__*/React.createElement("option", {
+    value: "15"
+  }, "15 jours"), /*#__PURE__*/React.createElement("option", {
+    value: "30"
+  }, "30 jours"), /*#__PURE__*/React.createElement("option", {
+    value: "45"
+  }, "45 jours"), /*#__PURE__*/React.createElement("option", {
+    value: "60"
+  }, "60 jours"), /*#__PURE__*/React.createElement("option", {
+    value: "90"
+  }, "90 jours"), /*#__PURE__*/React.createElement("option", {
+    value: "custom"
+  }, "Date personnalis\xE9e"))), (form.categorie === "client" || form.categorie === "fournisseur" || form.categorie === "sous_traitant") && /*#__PURE__*/React.createElement("div", {
+    className: "fg"
+  }, /*#__PURE__*/React.createElement("label", null, "Date d'\xE9ch\xE9ance"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: form.date_echeance || "",
+    onChange: e => sf("date_echeance", e.target.value),
+    min: form.date || today()
   })), form.categorie === "note_frais" && /*#__PURE__*/React.createElement("div", {
     className: "fg"
   }, /*#__PURE__*/React.createElement("label", null, "Type de note de frais"), /*#__PURE__*/React.createElement("select", {
@@ -4929,6 +5081,7 @@ function DetailModal({
   const [editForm, setEditForm] = useState({
     statut: entry.statut || "non_paye",
     date_paiement: entry.date_paiement || "",
+    date_echeance: entry.date_echeance || "",
     tiers: entry.tiers || "",
     numero: entry.numero || "",
     date: entry.date || "",
@@ -5086,6 +5239,12 @@ function DetailModal({
     type: "date",
     value: editForm.date_paiement,
     onChange: e => sfEdit("date_paiement", e.target.value)
+  })), ["client", "fournisseur", "sous_traitant"].includes(entry.categorie) && /*#__PURE__*/React.createElement("div", {
+    className: "fg"
+  }, /*#__PURE__*/React.createElement("label", null, "\uD83D\uDCC5 Date d'\xE9ch\xE9ance"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    value: editForm.date_echeance || "",
+    onChange: e => sfEdit("date_echeance", e.target.value)
   })), entry.categorie === "charges_sociales" && /*#__PURE__*/React.createElement("div", {
     className: "fg"
   }, /*#__PURE__*/React.createElement("label", null, "Organisme"), /*#__PURE__*/React.createElement("select", {
@@ -5181,7 +5340,22 @@ function DetailModal({
     style: {
       color: "var(--green)"
     }
-  }, fmtDate(entry.date_paiement))), entry.description && /*#__PURE__*/React.createElement("div", {
+  }, fmtDate(entry.date_paiement))), entry.date_echeance && (() => {
+    const now = new Date();
+    const ech = new Date(entry.date_echeance);
+    const retard = !entry.statut || entry.statut === "non_paye" ? Math.floor((now - ech) / 86400000) : 0;
+    return /*#__PURE__*/React.createElement("div", {
+      className: "dr"
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "dl"
+    }, "\uD83D\uDCC5 \xC9ch\xE9ance"), /*#__PURE__*/React.createElement("span", {
+      className: "dv",
+      style: {
+        color: retard > 0 ? "var(--red)" : retard > -7 ? "var(--amber)" : "var(--green)",
+        fontWeight: retard > 0 ? 700 : 400
+      }
+    }, fmtDate(entry.date_echeance), retard > 0 ? " 🚨 " + retard + "j de retard" : retard > -7 && retard <= 0 ? " ⚠ Bientôt" : ""));
+  })(), entry.description && /*#__PURE__*/React.createElement("div", {
     className: "dr"
   }, /*#__PURE__*/React.createElement("span", {
     className: "dl"
