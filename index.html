@@ -19,6 +19,9 @@
 
 
 
+
+
+
 /* ── RESET & BASE ── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -227,6 +230,9 @@ tbody tr.no-hover:hover td{background:none;cursor:default}
 .pg-wrap{display:flex;align-items:center;justify-content:center;gap:6px;padding:12px 16px;border-top:1px solid rgba(255,255,255,.04);flex-wrap:wrap}
 /* File storage indicator */
 .file-stored{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--blue);padding:2px 6px;background:rgba(96,165,250,.08);border-radius:10px;margin-top:4px}
+
+
+
 
 
 
@@ -826,6 +832,7 @@ const dbxGetLink = async path => {
   const token = getDbxToken();
   if (!token || !path) return null;
   try {
+    // Try temporary link first
     const res = await fetch("https://api.dropboxapi.com/2/files/get_temporary_link", {
       method: "POST",
       headers: {
@@ -836,10 +843,50 @@ const dbxGetLink = async path => {
         path
       })
     });
-    if (!res.ok) return null;
-    const d = await res.json();
-    return d.link || null;
-  } catch {
+    if (res.ok) {
+      const d = await res.json();
+      if (d.link) return d.link;
+    }
+    // Fallback: shared link
+    const res2 = await fetch("https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        path,
+        settings: {
+          requested_visibility: {
+            ".tag": "public"
+          }
+        }
+      })
+    });
+    if (res2.ok) {
+      const d2 = await res2.json();
+      return (d2.url || "").replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "?dl=1") || null;
+    }
+    // If link already exists, get it
+    const res3 = await fetch("https://api.dropboxapi.com/2/sharing/list_shared_links", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        path,
+        direct_only: true
+      })
+    });
+    if (res3.ok) {
+      const d3 = await res3.json();
+      const link = d3.links?.[0]?.url;
+      if (link) return link.replace("www.dropbox.com", "dl.dropboxusercontent.com").replace("?dl=0", "?dl=1");
+    }
+    return null;
+  } catch (e) {
+    console.error("dbxGetLink error:", e);
     return null;
   }
 };
@@ -1283,6 +1330,8 @@ function App() {
   const [alertEntry, setAlertEntry] = useState(null);
   const [syncStatus, setSyncStatus] = useState("idle");
   const [syncError, setSyncError] = useState("");
+  const [lastSyncAt, setLastSyncAt] = useState(() => lsGet("comptaia_last_sync", ""));
+  const [githubVersion, setGithubVersion] = useState(null); // null=checking, false=error, string=version
   const [dbxToken, setDbxTokenState] = useState(() => lsGet(LS_DBX, "") || "");
   const [apiKey, setApiKeyState] = useState(() => lsGet(LS_API, "") || "");
   const {
@@ -1291,6 +1340,17 @@ function App() {
   } = useToast();
 
   // Load
+  // Check GitHub for latest version
+  useEffect(() => {
+    fetch("https://api.github.com/repos/Ramses95530/ComptalA/commits/main", {
+      headers: {
+        "Accept": "application/vnd.github.v3+json"
+      }
+    }).then(r => r.json()).then(d => {
+      if (d.sha) setGithubVersion(d.sha.slice(0, 7) + " — " + new Date(d.commit?.committer?.date || d.commit?.author?.date).toLocaleDateString("fr-FR"));else setGithubVersion(false);
+    }).catch(() => setGithubVersion(false));
+  }, []);
+
   // Auto-sync from Dropbox every 60 seconds
   useEffect(() => {
     const tok = lsGet(LS_DBX, "");
@@ -1362,7 +1422,13 @@ function App() {
     if (tok) {
       setSyncStatus("syncing");
       dbxUpload(newData).then(() => {
+        const now = new Date().toLocaleTimeString("fr-FR", {
+          hour: "2-digit",
+          minute: "2-digit"
+        });
         setSyncStatus("ok");
+        setLastSyncAt(now);
+        lsSet("comptaia_last_sync", now);
         setTimeout(() => setSyncStatus("idle"), 3000);
       }).catch(e => {
         setSyncStatus("err");
@@ -1654,7 +1720,38 @@ function App() {
     className: "sb-co-name"
   }, "\uD83C\uDFE2 ", co.name || "Ma Société"), /*#__PURE__*/React.createElement("div", {
     className: "sb-co-sub"
-  }, "Changer de soci\xE9t\xE9 \u2192")), /*#__PURE__*/React.createElement("nav", {
+  }, "Changer de soci\xE9t\xE9 \u2192")), /*#__PURE__*/React.createElement("div", {
+    onClick: () => setPage("settings"),
+    style: {
+      margin: "0 12px 8px",
+      padding: "6px 10px",
+      borderRadius: "var(--r2)",
+      cursor: "pointer",
+      fontSize: 11,
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      background: !dbxToken ? "rgba(248,113,113,.1)" : syncStatus === "err" ? "rgba(248,113,113,.08)" : "rgba(74,222,128,.06)",
+      border: `1px solid ${!dbxToken ? "rgba(248,113,113,.3)" : syncStatus === "err" ? "rgba(248,113,113,.2)" : "rgba(74,222,128,.15)"}`
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 7,
+      height: 7,
+      borderRadius: "50%",
+      background: !dbxToken ? "#f87171" : syncStatus === "err" ? "#f87171" : syncStatus === "syncing" ? "#f59e0b" : "#4ade80",
+      display: "inline-block",
+      flexShrink: 0
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: !dbxToken ? "#f87171" : syncStatus === "err" ? "#f87171" : "var(--tx2)",
+      flex: 1,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, !dbxToken ? "Dropbox non connecté" : syncStatus === "syncing" ? "Sync en cours…" : syncStatus === "err" ? "Sync échouée" : syncStatus === "ok" ? "✓ Synchronisé" : "Dropbox actif" + (lastSyncAt ? " · " + lastSyncAt : ""))), /*#__PURE__*/React.createElement("nav", {
     className: "sb-nav"
   }, navGroups.map(g => /*#__PURE__*/React.createElement("div", {
     key: g.group
@@ -1678,16 +1775,58 @@ function App() {
     className: "topbar"
   }, /*#__PURE__*/React.createElement("div", {
     className: "topbar-title"
-  }, TITLES[page] || ""), /*#__PURE__*/React.createElement("div", {
+  }, TITLES[page] || ""), !dbxToken ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      padding: "4px 12px",
+      borderRadius: 20,
+      background: "rgba(248,113,113,.15)",
+      border: "1px solid rgba(248,113,113,.4)",
+      fontSize: 12,
+      color: "#f87171",
+      cursor: "pointer"
+    },
+    onClick: () => setPage("settings"),
+    title: "Cliquer pour connecter Dropbox"
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 8,
+      height: 8,
+      borderRadius: "50%",
+      background: "#f87171",
+      display: "inline-block"
+    }
+  }), "\u26A0 Dropbox non connect\xE9 \u2014 cliquez ici") : /*#__PURE__*/React.createElement("div", {
     className: "sync-pill" + (syncStatus === "ok" ? " ok" : syncStatus === "err" ? " err" : "")
   }, syncStatus === "syncing" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
     className: "spinner"
-  }), "Sync\u2026"), syncStatus === "ok" && "✓ Synchronisé", syncStatus === "err" && /*#__PURE__*/React.createElement("span", {
+  }), "Sync\u2026"), syncStatus === "ok" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 8,
+      height: 8,
+      borderRadius: "50%",
+      background: "#4ade80",
+      display: "inline-block",
+      marginRight: 4
+    }
+  }), "\u2713 Synchronis\xE9"), syncStatus === "err" && /*#__PURE__*/React.createElement("span", {
     title: syncError,
     style: {
-      cursor: "help"
+      cursor: "help",
+      color: "#f87171"
     }
-  }, "\u26A0 Sync \xE9chou\xE9e \u2014 ", syncError.slice(0, 40)), syncStatus === "idle" && dbxToken && "☁ Dropbox actif"), /*#__PURE__*/React.createElement("button", {
+  }, "\uD83D\uDD34 Sync \xE9chou\xE9e \u2014 ", syncError.slice(0, 35)), syncStatus === "idle" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 8,
+      height: 8,
+      borderRadius: "50%",
+      background: "#4ade80",
+      display: "inline-block",
+      marginRight: 4
+    }
+  }), "\u2601 Dropbox actif")), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost",
     onClick: () => setPage("import")
   }, "\uD83E\uDD16 Importer"), /*#__PURE__*/React.createElement("button", {
@@ -1761,7 +1900,9 @@ function App() {
     setDbxToken: setDbxToken,
     setSyncStatus: setSyncStatus,
     syncError: syncError,
-    setSyncError: setSyncError
+    setSyncError: setSyncError,
+    lastSyncAt: lastSyncAt,
+    githubVersion: githubVersion
   })))), showAdd && /*#__PURE__*/React.createElement(AddModal, {
     onClose: () => setShowAdd(false),
     onSave: e => {
@@ -2150,6 +2291,7 @@ function EntriesPage({
     amtMin: "",
     amtMax: "",
     tvaRate: "",
+    tiersFilter: "",
     onlyFraud: false,
     sort: "date_desc"
   });
@@ -2165,12 +2307,13 @@ function EntriesPage({
       amtMin: "",
       amtMax: "",
       tvaRate: "",
+      tiersFilter: "",
       onlyFraud: false,
       sort: "date_desc"
     });
     setCurPage(1);
   };
-  const hasFilter = search || f.dateFrom || f.dateTo || f.amtMin || f.amtMax || f.tvaRate || f.onlyFraud;
+  const hasFilter = search || f.dateFrom || f.dateTo || f.amtMin || f.amtMax || f.tvaRate || f.tiersFilter || f.onlyFraud;
   const filtered = useMemo(() => {
     let r = [...entries];
     if (search) {
@@ -2182,6 +2325,7 @@ function EntriesPage({
     if (f.amtMin) r = r.filter(e => num(e.ttc) >= num(f.amtMin));
     if (f.amtMax) r = r.filter(e => num(e.ttc) <= num(f.amtMax));
     if (f.tvaRate !== "") r = r.filter(e => String(e.tva_taux) === String(f.tvaRate));
+    if (f.tiersFilter) r = r.filter(e => (e.tiers || "").toLowerCase().includes(f.tiersFilter.toLowerCase()));
     if (f.onlyFraud) r = r.filter(e => e.fraudFlags?.length > 0);
     if (f.sort === "date_desc") r.sort((a, b) => (b.date || "") > (a.date || "") ? 1 : -1);else if (f.sort === "date_asc") r.sort((a, b) => (a.date || "") > (b.date || "") ? 1 : -1);else if (f.sort === "amt_desc") r.sort((a, b) => num(b.ttc) - num(a.ttc));else if (f.sort === "amt_asc") r.sort((a, b) => num(a.ttc) - num(b.ttc));else if (f.sort === "tiers") r.sort((a, b) => (a.tiers || "").localeCompare(b.tiers || ""));
     return r;
@@ -2226,6 +2370,12 @@ function EntriesPage({
     type: "date",
     value: f.dateTo,
     onChange: e => sf("dateTo", e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "fg"
+  }, /*#__PURE__*/React.createElement("label", null, "\uD83D\uDD0D Filtrer par tiers"), /*#__PURE__*/React.createElement("input", {
+    placeholder: "Nom du tiers exact ou partiel\u2026",
+    value: f.tiersFilter || "",
+    onChange: e => sf("tiersFilter", e.target.value)
   })), /*#__PURE__*/React.createElement("div", {
     className: "fg"
   }, /*#__PURE__*/React.createElement("label", null, "Montant min TTC"), /*#__PURE__*/React.createElement("input", {
@@ -2332,13 +2482,25 @@ function EntriesPage({
       }
     }, ORGS[e.charge_type]?.label || "—")), /*#__PURE__*/React.createElement("td", {
       style: {
+        maxWidth: 160
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
         fontWeight: 600,
-        maxWidth: 130,
         overflow: "hidden",
         textOverflow: "ellipsis",
         whiteSpace: "nowrap"
       }
-    }, e.tiers || "—"), /*#__PURE__*/React.createElement("td", {
+    }, e.tiers || "—"), e.designation && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: "var(--tx2)",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        marginTop: 1
+      }
+    }, e.designation)), /*#__PURE__*/React.createElement("td", {
       style: {
         color: "var(--tx3)",
         fontSize: 11
@@ -3158,13 +3320,25 @@ function SousTraitantsPage({
       }
     }, fmtDate(e.date)), /*#__PURE__*/React.createElement("td", {
       style: {
+        maxWidth: 160
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
         fontWeight: 600,
-        maxWidth: 130,
         overflow: "hidden",
         textOverflow: "ellipsis",
         whiteSpace: "nowrap"
       }
-    }, e.tiers || "—"), /*#__PURE__*/React.createElement("td", {
+    }, e.tiers || "—"), e.designation && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: "var(--tx2)",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        marginTop: 1
+      }
+    }, e.designation)), /*#__PURE__*/React.createElement("td", {
       style: {
         fontSize: 11,
         color: "var(--orange)",
@@ -3784,10 +3958,19 @@ function ImportPage({
   apiKey,
   notify
 }) {
-  const [queue, setQueue] = useState([]);
+  const [queue, setQueue] = useState(() => {
+    // Restore pending docs from localStorage
+    const pending = lsGet("comptaia_pending_docs", []);
+    return Array.isArray(pending) ? pending.map(p => ({
+      ...p,
+      status: "done",
+      file: null
+    })) : [];
+  });
   const [saved, setSaved] = useState(new Set());
   const [editId, setEditId] = useState(null);
   const [remFor, setRemFor] = useState(null);
+  const [showPending, setShowPending] = useState(false);
   const fileRef = useRef();
   const procRef = useRef(false);
   const addFiles = files => {
@@ -3937,7 +4120,108 @@ function ImportPage({
       marginLeft: "auto"
     },
     onClick: () => document.querySelector('.ni[data-page="settings"]')?.click()
-  }, "\u2192 Param\xE8tres")), /*#__PURE__*/React.createElement("div", {
+  }, "\u2192 Param\xE8tres")), lsGet("comptaia_pending_docs", []).length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "alert info",
+    style: {
+      cursor: "pointer",
+      background: "rgba(245,158,11,.08)",
+      borderColor: "rgba(245,158,11,.2)"
+    },
+    onClick: () => setShowPending(v => !v)
+  }, /*#__PURE__*/React.createElement("span", null, "\uD83D\uDCCB"), /*#__PURE__*/React.createElement("span", null, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: "var(--amber)"
+    }
+  }, lsGet("comptaia_pending_docs", []).length, " document(s) en attente d'affectation"), " \u2014 cliquez pour voir"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: "auto"
+    }
+  }, showPending ? "▲" : "▼")), showPending && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "var(--bg2)",
+      border: "1px solid rgba(245,158,11,.15)",
+      borderTop: "none",
+      borderRadius: "0 0 var(--r) var(--r)",
+      padding: 12
+    }
+  }, lsGet("comptaia_pending_docs", []).map((doc, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      padding: "8px 10px",
+      background: "var(--bg3)",
+      borderRadius: "var(--r2)",
+      marginBottom: 6,
+      flexWrap: "wrap"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: "var(--tx)"
+    }
+  }, doc.tiers || "Sans tiers"), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--tx2)",
+      marginLeft: 8
+    }
+  }, doc._filename || ""), /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--tx3)",
+      marginLeft: 8,
+      fontSize: 11
+    }
+  }, doc._savedAt ? new Date(doc._savedAt).toLocaleDateString("fr-FR") : "")), /*#__PURE__*/React.createElement("span", {
+    className: "mono",
+    style: {
+      color: "var(--gold)",
+      fontWeight: 700
+    }
+  }, eur(doc.ttc)), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-gold btn-sm",
+    onClick: () => {
+      addEntry(doc);
+      const all = lsGet("comptaia_pending_docs", []);
+      lsSet("comptaia_pending_docs", all.filter((_, idx) => idx !== i));
+      notify("✅ Document affecté !");
+    }
+  }, "\u2705 Affecter"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-ghost btn-sm",
+    onClick: () => {
+      // Re-add to queue for editing
+      setQueue(q => [...q, {
+        id: uid(),
+        file: {
+          name: doc._filename || "document",
+          type: "application/pdf",
+          size: 0
+        },
+        status: "done",
+        result: doc,
+        preview: doc._preview
+      }]);
+      const all = lsGet("comptaia_pending_docs", []);
+      lsSet("comptaia_pending_docs", all.filter((_, idx) => idx !== i));
+    }
+  }, "\u270F\uFE0F Modifier"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-danger btn-sm",
+    onClick: () => {
+      if (window.confirm("Supprimer ce document en attente ?")) {
+        const all = lsGet("comptaia_pending_docs", []);
+        lsSet("comptaia_pending_docs", all.filter((_, idx) => idx !== i));
+        notify("🗑 Supprimé");
+      }
+    }
+  }, "\uD83D\uDDD1"))))), /*#__PURE__*/React.createElement("div", {
     className: "drop-zone",
     onDragOver: e => {
       e.preventDefault();
@@ -4266,6 +4550,23 @@ function ImportPage({
     onClick: () => setEditId(editId === item.id ? null : item.id)
   }, editId === item.id ? "👁 Voir" : "✏ Corriger"), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-outline btn-sm",
+    onClick: () => {
+      // Save to pending queue
+      const pending = lsGet("comptaia_pending_docs", []);
+      const already = pending.find(p => p._id === item.result._id);
+      if (!already) {
+        lsSet("comptaia_pending_docs", [...pending, {
+          ...item.result,
+          _pending: true,
+          _savedAt: new Date().toISOString()
+        }]);
+        notify("📋 Gardé en attente d'affectation");
+      }
+      setQueue(q => q.filter(x => x.id !== item.id));
+    },
+    title: "Garder pour plus tard sans affecter"
+  }, "\uD83D\uDCCB En attente"), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-outline btn-sm",
     onClick: () => setRemFor(item.result)
   }, "\u23F0 Rappel"))))))));
 }
@@ -4281,7 +4582,9 @@ function SettingsPage({
   setDbxToken,
   setSyncStatus,
   syncError,
-  setSyncError
+  setSyncError,
+  lastSyncAt,
+  githubVersion
 }) {
   const [keyInput, setKeyInput] = useState(apiKey || "");
   const [keyStatus, setKeyStatus] = useState(apiKey ? "ok" : "none");
@@ -4702,6 +5005,150 @@ function SettingsPage({
     className: "setting-block"
   }, /*#__PURE__*/React.createElement("div", {
     className: "setting-hd"
+  }, "\uD83D\uDCE1 Statut du logiciel"), /*#__PURE__*/React.createElement("div", {
+    className: "setting-bd"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 10,
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "12px 14px",
+      borderRadius: "var(--r2)",
+      background: dbxToken ? "rgba(74,222,128,.08)" : "rgba(248,113,113,.08)",
+      border: `1px solid ${dbxToken ? "rgba(74,222,128,.25)" : "rgba(248,113,113,.3)"}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: "var(--tx2)",
+      marginBottom: 4
+    }
+  }, "\u2601 Dropbox"), dbxToken ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      flexDirection: "column",
+      gap: 2
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "#4ade80",
+      fontWeight: 700,
+      fontSize: 13
+    }
+  }, "\uD83D\uDFE2 Connect\xE9"), lastSyncAt && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      color: "var(--tx2)"
+    }
+  }, "Derni\xE8re sync : ", lastSyncAt), syncError && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 10,
+      color: "var(--red)",
+      marginTop: 2
+    }
+  }, "\u26A0 ", syncError.slice(0, 50))) : /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "#f87171",
+      fontWeight: 700,
+      fontSize: 13
+    }
+  }, "\uD83D\uDD34 Non connect\xE9"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: "var(--tx2)",
+      marginTop: 2
+    }
+  }, "La synchronisation est d\xE9sactiv\xE9e"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "12px 14px",
+      borderRadius: "var(--r2)",
+      background: "rgba(96,165,250,.08)",
+      border: "1px solid rgba(96,165,250,.2)"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: "var(--tx2)",
+      marginBottom: 4
+    }
+  }, "\uD83D\uDD04 Version GitHub"), githubVersion === null && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--tx3)",
+      fontSize: 12
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "spinner"
+  }), " V\xE9rification\u2026"), githubVersion === false && /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "var(--tx3)",
+      fontSize: 12
+    }
+  }, "Impossible de v\xE9rifier"), githubVersion && typeof githubVersion === "string" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "#60a5fa",
+      fontWeight: 700,
+      fontSize: 13
+    }
+  }, "\uD83D\uDFE6 ", githubVersion), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: "var(--tx2)",
+      marginTop: 2
+    }
+  }, "Dernier commit Netlify")))), !dbxToken && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      padding: "10px 14px",
+      background: "rgba(248,113,113,.06)",
+      borderRadius: "var(--r2)",
+      border: "1px solid rgba(248,113,113,.2)"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 20
+    }
+  }, "\uD83D\uDD34"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      flex: 1,
+      fontSize: 12,
+      color: "var(--tx2)"
+    }
+  }, "Dropbox non connect\xE9. Vos donn\xE9es ne sont sauvegard\xE9es que sur cet appareil."), /*#__PURE__*/React.createElement("button", {
+    className: "btn btn-gold btn-sm",
+    onClick: () => {
+      document.querySelector(".setting-block:nth-child(2)")?.scrollIntoView({
+        behavior: "smooth"
+      });
+    }
+  }, "Connecter \u2192")), dbxToken && syncError && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "10px 14px",
+      background: "rgba(248,113,113,.06)",
+      borderRadius: "var(--r2)",
+      border: "1px solid rgba(248,113,113,.2)",
+      fontSize: 12,
+      color: "var(--tx2)"
+    }
+  }, "\uD83D\uDD34 Derni\xE8re erreur Dropbox : ", /*#__PURE__*/React.createElement("b", {
+    style: {
+      color: "var(--red)"
+    }
+  }, syncError), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 4,
+      fontSize: 11,
+      color: "var(--tx3)"
+    }
+  }, "V\xE9rifiez votre connexion et les permissions de l'app Dropbox.")))), /*#__PURE__*/React.createElement("div", {
+    className: "setting-block"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "setting-hd"
   }, "\u2139 \xC0 propos"), /*#__PURE__*/React.createElement("div", {
     className: "setting-bd",
     style: {
@@ -4719,6 +5166,75 @@ function SettingsPage({
       color: "var(--tx3)"
     }
   }, "Vos donn\xE9es restent sur votre appareil et dans votre Dropbox. Aucune donn\xE9e comptable n'est transmise \xE0 des tiers sauf lors de l'analyse IA des documents (API Anthropic)."))));
+}
+
+// ── QUICK STATUT MENU ──
+function QuickStatutMenu({
+  entry,
+  onEdit,
+  onClose
+}) {
+  const ref = React.useRef();
+  useEffect(() => {
+    const handler = e => {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [onClose]);
+  return /*#__PURE__*/React.createElement("div", {
+    ref: ref,
+    style: {
+      position: "fixed",
+      zIndex: 9999,
+      background: "var(--bg2)",
+      border: "1px solid rgba(201,168,76,.3)",
+      borderRadius: "var(--r)",
+      boxShadow: "0 8px 32px rgba(0,0,0,.5)",
+      padding: "6px",
+      minWidth: 210
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 10,
+      color: "var(--tx3)",
+      padding: "4px 8px",
+      marginBottom: 4,
+      fontWeight: 600,
+      letterSpacing: 1,
+      textTransform: "uppercase"
+    }
+  }, "Changer le statut"), Object.entries(STATUTS).map(([k, v]) => /*#__PURE__*/React.createElement("div", {
+    key: k,
+    onClick: () => {
+      onEdit(entry.id, {
+        statut: k,
+        date_paiement: k === "paye" ? today() : entry.date_paiement || ""
+      });
+      onClose();
+    },
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      padding: "7px 10px",
+      borderRadius: "var(--r2)",
+      cursor: "pointer",
+      fontSize: 12,
+      background: entry.statut === k ? "rgba(201,168,76,.1)" : "transparent",
+      color: entry.statut === k ? "var(--gold)" : v.color,
+      fontWeight: entry.statut === k ? 700 : 400
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 14
+    }
+  }, v.icon), /*#__PURE__*/React.createElement("span", null, v.label), entry.statut === k && /*#__PURE__*/React.createElement("span", {
+    style: {
+      marginLeft: "auto",
+      fontSize: 10
+    }
+  }, "\u2713"))));
 }
 
 // ── MODALS ──
@@ -4760,6 +5276,8 @@ function AddModal({
     st_chantier: "",
     st_retenue: "",
     st_autoliquidation: false,
+    designation: "",
+    commentaire: "",
     tiers: "",
     numero: "",
     date: today(),
@@ -4911,12 +5429,28 @@ function AddModal({
     }
   }), errs.ttc && /*#__PURE__*/React.createElement("span", {
     className: "err-msg"
-  }, errs.ttc)), /*#__PURE__*/React.createElement("div", {
+  }, errs.ttc)), form.categorie === "client" && /*#__PURE__*/React.createElement("div", {
     className: "fg full"
-  }, /*#__PURE__*/React.createElement("label", null, "Description"), /*#__PURE__*/React.createElement("textarea", {
-    placeholder: "Notes, d\xE9tails\u2026",
+  }, /*#__PURE__*/React.createElement("label", null, "D\xE9signation (objet de la facture)"), /*#__PURE__*/React.createElement("input", {
+    placeholder: "Ex: Travaux \xE9lectriques chantier Paris 15\xE8me\u2026",
+    value: form.designation || "",
+    onChange: e => sf("designation", e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "fg full"
+  }, /*#__PURE__*/React.createElement("label", null, "Description / Notes"), /*#__PURE__*/React.createElement("textarea", {
+    placeholder: "D\xE9tails, informations compl\xE9mentaires\u2026",
     value: form.description,
     onChange: e => sf("description", e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "fg full"
+  }, /*#__PURE__*/React.createElement("label", null, "\uD83D\uDCAC Commentaire interne"), /*#__PURE__*/React.createElement("textarea", {
+    placeholder: "Note interne, remarques, suivi\u2026",
+    value: form.commentaire || "",
+    onChange: e => sf("commentaire", e.target.value),
+    style: {
+      background: "rgba(201,168,76,.04)",
+      borderColor: "rgba(201,168,76,.2)"
+    }
   })), (form.categorie === "client" || form.categorie === "fournisseur" || form.categorie === "divers") && /*#__PURE__*/React.createElement("div", {
     className: "fg"
   }, /*#__PURE__*/React.createElement("label", null, "Statut de paiement"), /*#__PURE__*/React.createElement("select", {
@@ -5090,6 +5624,9 @@ function DetailModal({
     tva_montant: entry.tva_montant || "",
     ttc: entry.ttc || "",
     description: entry.description || "",
+    designation: entry.designation || "",
+    commentaire: entry.commentaire || "",
+    categorie: entry.categorie || "client",
     st_chantier: entry.st_chantier || "",
     st_retenue: entry.st_retenue || "",
     st_autoliquidation: entry.st_autoliquidation || false,
@@ -5181,6 +5718,14 @@ function DetailModal({
   }), editMode ? /*#__PURE__*/React.createElement("div", {
     className: "form-2"
   }, /*#__PURE__*/React.createElement("div", {
+    className: "fg"
+  }, /*#__PURE__*/React.createElement("label", null, "Cat\xE9gorie"), /*#__PURE__*/React.createElement("select", {
+    value: editForm.categorie,
+    onChange: e => sfEdit("categorie", e.target.value)
+  }, Object.entries(CATS).map(([k, v]) => /*#__PURE__*/React.createElement("option", {
+    key: k,
+    value: k
+  }, v.icon, " ", v.label)))), /*#__PURE__*/React.createElement("div", {
     className: "fg full"
   }, /*#__PURE__*/React.createElement("label", null, "Tiers / Organisme"), /*#__PURE__*/React.createElement("input", {
     value: editForm.tiers,
@@ -5275,11 +5820,27 @@ function DetailModal({
     max: "10",
     value: editForm.st_retenue,
     onChange: e => sfEdit("st_retenue", e.target.value)
+  })), entry.categorie === "client" && /*#__PURE__*/React.createElement("div", {
+    className: "fg full"
+  }, /*#__PURE__*/React.createElement("label", null, "D\xE9signation (objet de la facture)"), /*#__PURE__*/React.createElement("input", {
+    value: editForm.designation || "",
+    onChange: e => sfEdit("designation", e.target.value),
+    placeholder: "Objet de la facture\u2026"
   })), /*#__PURE__*/React.createElement("div", {
     className: "fg full"
   }, /*#__PURE__*/React.createElement("label", null, "Description / Notes"), /*#__PURE__*/React.createElement("textarea", {
     value: editForm.description,
     onChange: e => sfEdit("description", e.target.value)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "fg full"
+  }, /*#__PURE__*/React.createElement("label", null, "\uD83D\uDCAC Commentaire interne"), /*#__PURE__*/React.createElement("textarea", {
+    value: editForm.commentaire || "",
+    onChange: e => sfEdit("commentaire", e.target.value),
+    placeholder: "Note interne\u2026",
+    style: {
+      background: "rgba(201,168,76,.04)",
+      borderColor: "rgba(201,168,76,.2)"
+    }
   })), editForm.ht && editForm.tva_taux && /*#__PURE__*/React.createElement("div", {
     style: {
       background: "var(--bg3)",
@@ -5355,7 +5916,16 @@ function DetailModal({
         fontWeight: retard > 0 ? 700 : 400
       }
     }, fmtDate(entry.date_echeance), retard > 0 ? " 🚨 " + retard + "j de retard" : retard > -7 && retard <= 0 ? " ⚠ Bientôt" : ""));
-  })(), entry.description && /*#__PURE__*/React.createElement("div", {
+  })(), entry.designation && /*#__PURE__*/React.createElement("div", {
+    className: "dr"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "dl"
+  }, "\uD83D\uDCCB D\xE9signation"), /*#__PURE__*/React.createElement("span", {
+    className: "dv",
+    style: {
+      fontWeight: 600
+    }
+  }, entry.designation)), entry.description && /*#__PURE__*/React.createElement("div", {
     className: "dr"
   }, /*#__PURE__*/React.createElement("span", {
     className: "dl"
@@ -5365,7 +5935,24 @@ function DetailModal({
       fontSize: 12,
       textAlign: "right"
     }
-  }, entry.description)), entry.st_chantier && /*#__PURE__*/React.createElement("div", {
+  }, entry.description)), entry.commentaire && /*#__PURE__*/React.createElement("div", {
+    className: "dr",
+    style: {
+      background: "rgba(201,168,76,.04)",
+      borderRadius: "var(--r2)",
+      padding: "6px 10px",
+      marginTop: 4
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "dl"
+  }, "\uD83D\uDCAC Commentaire"), /*#__PURE__*/React.createElement("span", {
+    className: "dv",
+    style: {
+      fontSize: 12,
+      color: "var(--gold)",
+      textAlign: "right"
+    }
+  }, entry.commentaire)), entry.st_chantier && /*#__PURE__*/React.createElement("div", {
     className: "dr"
   }, /*#__PURE__*/React.createElement("span", {
     className: "dl"
