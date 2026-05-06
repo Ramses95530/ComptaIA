@@ -1517,6 +1517,14 @@ function App() {
     setDetailEntry(null);
     notify("🗑 Supprimé");
   };
+  const bulkDelete = ids => {
+    updateCo(c => ({...c, entries: c.entries.filter(e => !ids.has(e.id))}));
+    notify("🗑 " + ids.size + " saisie(s) supprimée(s)");
+  };
+  const bulkEdit = (ids, changes) => {
+    updateCo(c => ({...c, entries: c.entries.map(e => ids.has(e.id) ? {...e, ...changes} : e)}));
+    notify("✅ " + ids.size + " saisie(s) modifiée(s)");
+  };
   const editEntry = (id, changes) => {
     updateCo(c => ({
       ...c,
@@ -1878,7 +1886,9 @@ function App() {
     entries: entries,
     setDetailEntry: setDetailEntry,
     setPage: setPage,
-    onEditEntry: editEntry
+    onEditEntry: editEntry,
+    onBulkDelete: bulkDelete,
+    onBulkEdit: bulkEdit
   }), page === "eurofactor" && /*#__PURE__*/React.createElement(EurofactorPage, {
     entries: entries,
     setDetailEntry: setDetailEntry
@@ -2279,12 +2289,18 @@ function EntriesPage({
   page,
   setDetailEntry,
   setAlertEntry,
-  onEditEntry
+  onEditEntry,
+  onBulkDelete,
+  onBulkEdit
 }) {
   const [search, setSearch] = useState("");
   const [showAdv, setShowAdv] = useState(false);
   const [curPage, setCurPage] = useState(1);
-  const [quickMenu, setQuickMenu] = useState(null); // {entryId, x, y}
+  const [quickMenu, setQuickMenu] = useState(null);
+  const [selected, setSelected] = useState(new Set());
+  const [bulkStatut, setBulkStatut] = useState("");
+  const [bulkCat, setBulkCat] = useState("");
+  const [confirmBulkDel, setConfirmBulkDel] = useState(false); // {entryId, x, y}
   const [f, setF] = useState({
     dateFrom: "",
     dateTo: "",
@@ -2434,7 +2450,41 @@ function EntriesPage({
       cursor: "pointer",
       color: "var(--tx2)"
     }
-  }, "Anomalies uniquement"))), /*#__PURE__*/React.createElement("div", {
+  }, "Anomalies uniquement"))), selected.size > 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display:"flex", alignItems:"center", gap:10, padding:"10px 14px",
+      background:"rgba(201,168,76,.1)", border:"1px solid rgba(201,168,76,.3)",
+      borderRadius:"var(--r2)", marginBottom:10, flexWrap:"wrap"
+    }
+  },
+    /*#__PURE__*/React.createElement("span", {style:{fontSize:13,fontWeight:700,color:"var(--gold)"}},
+      "☑ " + selected.size + " sélectionnée(s)"
+    ),
+    /*#__PURE__*/React.createElement("span", {style:{flex:1}}),
+    /*#__PURE__*/React.createElement("select", {
+      value: bulkStatut, style:{background:"var(--bg3)",border:"1px solid rgba(255,255,255,.1)",borderRadius:"var(--r2)",padding:"5px 8px",fontSize:12,color:"var(--tx)"},
+      onChange: ev => { if(ev.target.value){ onBulkEdit(selected,{statut:ev.target.value}); setSelected(new Set()); setBulkStatut(""); }}
+    },
+      /*#__PURE__*/React.createElement("option", {value:""}, "✏️ Changer statut…"),
+      Object.entries(STATUTS).map(([k,v]) => /*#__PURE__*/React.createElement("option", {key:k, value:k}, v.icon + " " + v.label))
+    ),
+    /*#__PURE__*/React.createElement("select", {
+      value: bulkCat, style:{background:"var(--bg3)",border:"1px solid rgba(255,255,255,.1)",borderRadius:"var(--r2)",padding:"5px 8px",fontSize:12,color:"var(--tx)"},
+      onChange: ev => { if(ev.target.value){ onBulkEdit(selected,{categorie:ev.target.value}); setSelected(new Set()); setBulkCat(""); }}
+    },
+      /*#__PURE__*/React.createElement("option", {value:""}, "📂 Déplacer vers…"),
+      Object.entries(CATS).map(([k,v]) => /*#__PURE__*/React.createElement("option", {key:k, value:k}, v.icon + " " + v.label))
+    ),
+    confirmBulkDel
+    ? /*#__PURE__*/React.createElement(React.Fragment, null,
+        /*#__PURE__*/React.createElement("span", {style:{fontSize:12,color:"var(--red)"}}, "Confirmer la suppression de " + selected.size + " saisie(s) ?"),
+        /*#__PURE__*/React.createElement("button", {className:"btn btn-danger btn-sm", onClick:()=>{ onBulkDelete(selected); setSelected(new Set()); setConfirmBulkDel(false); }}, "✅ Confirmer"),
+        /*#__PURE__*/React.createElement("button", {className:"btn btn-ghost btn-sm", onClick:()=>setConfirmBulkDel(false)}, "Annuler")
+      )
+    : /*#__PURE__*/React.createElement("button", {className:"btn btn-danger btn-sm", onClick:()=>setConfirmBulkDel(true)}, "🗑 Supprimer la sélection"),
+    /*#__PURE__*/React.createElement("button", {className:"btn btn-ghost btn-sm", onClick:()=>{ setSelected(new Set()); setConfirmBulkDel(false); }}, "✕ Désélectionner")
+  ),
+  /*#__PURE__*/React.createElement("div", {
     className: "tbl-wrap"
   }, /*#__PURE__*/React.createElement("div", {
     className: "tbl-hd"
@@ -2464,12 +2514,20 @@ function EntriesPage({
     className: "empty-icon"
   }, "\uD83D\uDCC2"), /*#__PURE__*/React.createElement("p", null, "Aucune entr\xE9e ne correspond aux filtres.")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     className: "tbl-scroll"
-  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", null, "Date"), page === "all" && /*#__PURE__*/React.createElement("th", null, "Cat."), page === "charges" && /*#__PURE__*/React.createElement("th", null, "Organisme"), page === "notes_frais" && /*#__PURE__*/React.createElement("th", null, "Type"), /*#__PURE__*/React.createElement("th", null, "Tiers"), /*#__PURE__*/React.createElement("th", null, "N\xB0"), /*#__PURE__*/React.createElement("th", null, "HT"), /*#__PURE__*/React.createElement("th", null, "TVA%"), /*#__PURE__*/React.createElement("th", null, "TVA\u20AC"), /*#__PURE__*/React.createElement("th", null, "TTC"), /*#__PURE__*/React.createElement("th", null, "\xC9ch\xE9ance"), /*#__PURE__*/React.createElement("th", null, "Statut"), /*#__PURE__*/React.createElement("th", null, "\u26A0"))), /*#__PURE__*/React.createElement("tbody", null, paginated.map(e => {
+  }, /*#__PURE__*/React.createElement("table", null, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {style:{width:36,paddingRight:4,textAlign:"center"}}, /*#__PURE__*/React.createElement("input", {type:"checkbox", style:{cursor:"pointer"}, checked: paginated.length>0 && paginated.every(e=>selected.has(e.id)), onChange: ev => { if(ev.target.checked){ setSelected(s=>new Set([...s,...paginated.map(e=>e.id)])); } else { setSelected(s=>{const n=new Set(s);paginated.forEach(e=>n.delete(e.id));return n;});}}})), /*#__PURE__*/React.createElement("th", null, "Date"), page === "all" && /*#__PURE__*/React.createElement("th", null, "Cat."), page === "charges" && /*#__PURE__*/React.createElement("th", null, "Organisme"), page === "notes_frais" && /*#__PURE__*/React.createElement("th", null, "Type"), /*#__PURE__*/React.createElement("th", null, "Tiers"), /*#__PURE__*/React.createElement("th", null, "N\xB0"), /*#__PURE__*/React.createElement("th", null, "HT"), /*#__PURE__*/React.createElement("th", null, "TVA%"), /*#__PURE__*/React.createElement("th", null, "TVA\u20AC"), /*#__PURE__*/React.createElement("th", null, "TTC"), /*#__PURE__*/React.createElement("th", null, "\xC9ch\xE9ance"), /*#__PURE__*/React.createElement("th", null, "Statut"), /*#__PURE__*/React.createElement("th", null, "\u26A0"))), /*#__PURE__*/React.createElement("tbody", null, paginated.map(e => {
     const sev = fraudSev(e.fraudFlags);
     return /*#__PURE__*/React.createElement("tr", {
       key: e.id,
-      onClick: () => setDetailEntry(e)
+      onClick: () => setDetailEntry(e),
+      style: selected.has(e.id) ? {background:"rgba(201,168,76,.08)"} : {}
     }, /*#__PURE__*/React.createElement("td", {
+      onClick: ev => ev.stopPropagation(),
+      style: {textAlign:"center",paddingRight:4,width:36}
+    }, /*#__PURE__*/React.createElement("input", {
+      type:"checkbox", style:{cursor:"pointer"},
+      checked: selected.has(e.id),
+      onChange: ev => { ev.stopPropagation(); setSelected(s=>{const n=new Set(s);ev.target.checked?n.add(e.id):n.delete(e.id);return n;}); }
+    })), /*#__PURE__*/React.createElement("td", {
       style: {
         whiteSpace: "nowrap"
       }
@@ -3313,8 +3371,16 @@ function SousTraitantsPage({
     const retMont = num(e.st_retenue) > 0 ? num(e.ht) * num(e.st_retenue) / 100 : 0;
     const row = /*#__PURE__*/React.createElement("tr", {
       key: e.id,
-      onClick: () => setDetailEntry(e)
+      onClick: () => setDetailEntry(e),
+      style: selected.has(e.id) ? {background:"rgba(201,168,76,.08)"} : {}
     }, /*#__PURE__*/React.createElement("td", {
+      onClick: ev => ev.stopPropagation(),
+      style: {textAlign:"center",paddingRight:4,width:36}
+    }, /*#__PURE__*/React.createElement("input", {
+      type:"checkbox", style:{cursor:"pointer"},
+      checked: selected.has(e.id),
+      onChange: ev => { ev.stopPropagation(); setSelected(s=>{const n=new Set(s);ev.target.checked?n.add(e.id):n.delete(e.id);return n;}); }
+    })), /*#__PURE__*/React.createElement("td", {
       style: {
         whiteSpace: "nowrap"
       }
