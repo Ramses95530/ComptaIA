@@ -1865,7 +1865,9 @@ function App() {
     page: page,
     setDetailEntry: setDetailEntry,
     setAlertEntry: setAlertEntry,
-    onEditEntry: editEntry
+    onEditEntry: editEntry,
+    onBulkDelete: bulkDelete,
+    onBulkEdit: bulkEdit
   }), page === "tva" && /*#__PURE__*/React.createElement(TVAPage, {
     entries: entries
   }), page === "amort" && /*#__PURE__*/React.createElement(AmortPage, {
