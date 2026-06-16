@@ -4084,7 +4084,7 @@ function ImportPage({
         });
         const PROMPT_IA = "Expert-comptable francais. Analyse ce document. Retourne UNIQUEMENT un JSON valide sans markdown:\n" +
           '{"categorie":"client"|"fournisseur"|"charges_sociales"|"note_frais"|"divers"|"releve"|"sous_traitant","charge_type":"urssaf"|"probtp"|"msa"|"cipav"|"retraite"|"prevoyance"|"mutuelle"|"france_travail"|"autre"|null,"note_type":"repas"|"transport"|"hebergement"|"carburant"|"fournitures"|"telephone"|"formation"|"autre"|null,"tiers":"nom ou null","numero":"ref ou null","date":"YYYY-MM-DD ou null","ht":nombre_ou_null,"tva_taux":0|5.5|10|20,"tva_montant":nombre_ou_null,"ttc":nombre_ou_null,"designation":"objet facture ou null","description":"courte desc","confiance":"haute"|"moyenne"|"basse","alerte":null|"anomalie","reporting":null}';
-        const resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + encodeURIComponent(apiKey), {
+        const resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + encodeURIComponent(apiKey), {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
@@ -4665,7 +4665,7 @@ function SettingsPage({
     setKeyStatus("testing");
     setKeyErr("");
     try {
-      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + encodeURIComponent(key), {
+      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + encodeURIComponent(key), {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
