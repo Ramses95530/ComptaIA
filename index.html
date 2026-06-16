@@ -4082,39 +4082,29 @@ function ImportPage({
           r.onerror = rej;
           r.readAsDataURL(f);
         });
-        const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        const PROMPT_IA = "Expert-comptable francais. Analyse ce document. Retourne UNIQUEMENT un JSON valide sans markdown:\n" +
+          '{"categorie":"client"|"fournisseur"|"charges_sociales"|"note_frais"|"divers"|"releve"|"sous_traitant","charge_type":"urssaf"|"probtp"|"msa"|"cipav"|"retraite"|"prevoyance"|"mutuelle"|"france_travail"|"autre"|null,"note_type":"repas"|"transport"|"hebergement"|"carburant"|"fournitures"|"telephone"|"formation"|"autre"|null,"tiers":"nom ou null","numero":"ref ou null","date":"YYYY-MM-DD ou null","ht":nombre_ou_null,"tva_taux":0|5.5|10|20,"tva_montant":nombre_ou_null,"ttc":nombre_ou_null,"designation":"objet facture ou null","description":"courte desc","confiance":"haute"|"moyenne"|"basse","alerte":null|"anomalie","reporting":null}';
+        const resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + encodeURIComponent(apiKey), {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01",
-            "anthropic-dangerous-direct-browser-access": "true"
+            "Content-Type": "application/json"
           },
           body: JSON.stringify({
-            model: "claude-opus-4-5",
-            max_tokens: 1200,
-            messages: [{
-              role: "user",
-              content: [{
-                type: isImg ? "image" : "document",
-                source: {
-                  type: "base64",
-                  media_type: f.type,
-                  data: b64
-                }
-              }, {
-                type: "text",
-                text: `Expert-comptable français. Analyse ce document. Retourne UNIQUEMENT un JSON valide sans markdown:\n{"categorie":"client"|"fournisseur"|"charges_sociales"|"divers"|"releve","charge_type":"urssaf"|"probtp"|"msa"|"cipav"|"retraite"|"prevoyance"|"mutuelle"|"france_travail"|"autre"|null,"tiers":"nom ou null","numero":"ref ou null","date":"YYYY-MM-DD ou null","ht":nombre_ou_null,"tva_taux":0|5.5|10|20,"tva_montant":nombre_ou_null,"ttc":nombre_ou_null,"description":"courte desc","confiance":"haute"|"moyenne"|"basse","alerte":null|"anomalie détectée","reporting":null|"reporting mois précédent si détecté"}`
-              }]
-            }]
+            contents: [{
+              parts: [
+                { inline_data: { mime_type: f.type, data: b64 } },
+                { text: PROMPT_IA }
+              ]
+            }],
+            generationConfig: { temperature: 0, maxOutputTokens: 1200 }
           })
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
-          throw new Error(err.error?.message || `Erreur API ${resp.status}`);
+          throw new Error(err.error?.message || ("Erreur API Gemini " + resp.status));
         }
         const d = await resp.json();
-        const txt = d.content?.map(c => c.text || "").join("") || "";
+        const txt = d.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("") || "";
         const parsed = JSON.parse(txt.replace(/```(?:json)?|```/g, "").trim());
         parsed._id = pending.id;
         parsed._filename = f.name;
@@ -4182,7 +4172,7 @@ function ImportPage({
     style: {
       marginBottom: 14
     }
-  }, /*#__PURE__*/React.createElement("span", null, "\u26A0"), /*#__PURE__*/React.createElement("span", null, "Cl\xE9 API Anthropic manquante."), /*#__PURE__*/React.createElement("button", {
+  }, /*#__PURE__*/React.createElement("span", null, "\u26A0"), /*#__PURE__*/React.createElement("span", null, "Cl\xE9 API Gemini manquante."), /*#__PURE__*/React.createElement("button", {
     className: "btn btn-ghost btn-sm",
     style: {
       marginLeft: "auto"
@@ -4675,21 +4665,14 @@ function SettingsPage({
     setKeyStatus("testing");
     setKeyErr("");
     try {
-      const r = await fetch("https://api.anthropic.com/v1/messages", {
+      const r = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + encodeURIComponent(key), {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "x-api-key": key,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: "claude-haiku-4-5",
-          max_tokens: 10,
-          messages: [{
-            role: "user",
-            content: "ok"
-          }]
+          contents: [{ parts: [{ text: "ok" }] }],
+          generationConfig: { maxOutputTokens: 10 }
         })
       });
       if (r.ok || r.status === 400) {
@@ -4807,11 +4790,11 @@ function SettingsPage({
     className: "setting-block"
   }, /*#__PURE__*/React.createElement("div", {
     className: "setting-hd"
-  }, "\uD83D\uDD11 Cl\xE9 API Anthropic (pour l'import IA)"), /*#__PURE__*/React.createElement("div", {
+  }, "\uD83D\uDD11 Cl\xE9 API Google Gemini (gratuite)"), /*#__PURE__*/React.createElement("div", {
     className: "setting-bd"
   }, /*#__PURE__*/React.createElement("div", {
     className: "setting-hint"
-  }, "1. Allez sur ", /*#__PURE__*/React.createElement("b", null, "console.anthropic.com"), " \u2192 cr\xE9ez un compte \u2192 API Keys \u2192 Create Key", /*#__PURE__*/React.createElement("br", null), "2. Copiez la cl\xE9 (commence par ", /*#__PURE__*/React.createElement("b", null, "sk-ant-\u2026"), ") et collez-la ci-dessous", /*#__PURE__*/React.createElement("br", null), "\uD83D\uDCB0 ~0,001 \u20AC par document \u2014 5$ gratuits \xE0 l'inscription"), /*#__PURE__*/React.createElement("div", {
+  }, "1. Allez sur ", /*#__PURE__*/React.createElement("b", null, "aistudio.google.com"), " \u2192 Get API Key \u2192 Create API Key (gratuit, sans carte bancaire)", /*#__PURE__*/React.createElement("br", null), "2. Copiez la cl\xE9 (commence par ", /*#__PURE__*/React.createElement("b", null, "AIza\u2026"), ") et collez-la ci-dessous", /*#__PURE__*/React.createElement("br", null), "\uD83C\uDD93 Gratuit \u2014 quota g\xE9n\xE9reux, aucune carte bancaire requise"), /*#__PURE__*/React.createElement("div", {
     className: "api-status " + (keyStatus === "ok" ? "ok" : keyStatus === "err" ? "err" : "none")
   }, keyStatus === "testing" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", {
     className: "spinner"
@@ -4833,7 +4816,7 @@ function SettingsPage({
       fontFamily: "monospace",
       outline: "none"
     },
-    placeholder: "sk-ant-api03-\u2026",
+    placeholder: "AIzaSy\u2026",
     value: keyInput,
     onChange: e => {
       setKeyInput(e.target.value);
@@ -5228,12 +5211,12 @@ function SettingsPage({
     style: {
       color: "var(--tx)"
     }
-  }, "ComptaIA v", APP_VERSION), " \u2014 Gestion Comptable Intelligente"), /*#__PURE__*/React.createElement("div", null, "Propuls\xE9 par Claude (Anthropic) \xB7 Donn\xE9es stock\xE9es localement + Dropbox"), /*#__PURE__*/React.createElement("div", {
+  }, "ComptaIA v", APP_VERSION), " \u2014 Gestion Comptable Intelligente"), /*#__PURE__*/React.createElement("div", null, "Propuls\xE9 par Google Gemini \xB7 Donn\xE9es stock\xE9es localement + Dropbox"), /*#__PURE__*/React.createElement("div", {
     style: {
       marginTop: 8,
       color: "var(--tx3)"
     }
-  }, "Vos donn\xE9es restent sur votre appareil et dans votre Dropbox. Aucune donn\xE9e comptable n'est transmise \xE0 des tiers sauf lors de l'analyse IA des documents (API Anthropic)."))));
+  }, "Vos donn\xE9es restent sur votre appareil et dans votre Dropbox. Aucune donn\xE9e comptable n'est transmise \xE0 des tiers sauf lors de l'analyse IA des documents (API Google Gemini, gratuite)."))));
 }
 
 // ── QUICK STATUT MENU ──
